@@ -117,7 +117,7 @@ func UpdateLibs() error {
 		return err
 	}
 	wasmDir := filepath.Join(wd, "internal", "wasm")
-	if err := os.MkdirAll(wasmDir, 0x755); err != nil {
+	if err := os.MkdirAll(wasmDir, 0o755); err != nil {
 		return err
 	}
 	return sh.RunV("docker", "run", "-it", "--rm", "-v", fmt.Sprintf("%s:/out", wasmDir), "wasilibs-build")
