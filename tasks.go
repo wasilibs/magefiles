@@ -107,6 +107,22 @@ func BenchAll() error {
 		"build/bench_default.txt", "build/bench.txt", "build/bench_cgo.txt")
 }
 
+// UpdateLibs updates the precompiled wasm libraries.
+func UpdateLibs() error {
+	if err := sh.RunV("docker", "build", "-t", "wasilibs-build", "-f", filepath.Join("buildtools", "wasm", "Dockerfile"), "."); err != nil {
+		return err
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	wasmDir := filepath.Join(wd, "internal", "wasm")
+	if err := os.MkdirAll(wasmDir, 0x755); err != nil {
+		return err
+	}
+	return sh.RunV("docker", "run", "-it", "--rm", "-v", fmt.Sprintf("%s:/out", wasmDir), "wasilibs-build")
+}
+
 func buildTags() string {
 	mode := strings.ToLower(os.Getenv("WASI_TEST_MODE"))
 
