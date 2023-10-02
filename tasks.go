@@ -1,0 +1,119 @@
+package magefiles
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/magefile/mage/mg"
+	"github.com/magefile/mage/sh"
+
+	"github.com/wasilibs/magefiles/internal/args"
+	"github.com/wasilibs/magefiles/internal/meta"
+	"github.com/wasilibs/magefiles/internal/versions"
+)
+
+// SetLibraryName sets the library name of the importing project.
+// It is used to determine things like build tags.
+func SetLibraryName(name string) {
+	meta.LibraryName = name
+}
+
+// Test runs unit tests - by default, it uses wazero; set WASI_TEST_MODE=cgo or WASI_TEST_MODE=tinygo to use either
+func Test() error {
+	mode := strings.ToLower(os.Getenv("WASI_TEST_MODE"))
+
+	if mode != "tinygo" {
+		return sh.RunV("go", "test", "-v", "-timeout=20m", "-tags", buildTags(), "./...")
+	}
+
+	return sh.RunV("tinygo", "test", "-target=wasi", "-v", "-tags", buildTags(), "./...")
+}
+
+// Format autoformats the code.
+func Format() error {
+	if err := sh.RunV("go", "run", fmt.Sprintf("mvdan.cc/gofumpt@%s", versions.GoFumpt), "-l", "-w", "."); err != nil {
+		return err
+	}
+	if err := sh.RunV("go", "run", fmt.Sprintf("github.com/rinchsan/gosimports/cmd/gosimports@%s", versions.GosImports), "-w",
+		"-local", "github.com/wasilibs",
+		"."); err != nil {
+		return nil
+	}
+	return nil
+}
+
+// Lint runs lint checks.
+func Lint() error {
+	return sh.RunV("go", "run", fmt.Sprintf("github.com/golangci/golangci-lint/cmd/golangci-lint@%s", versions.GolangCILint), "run", "--build-tags", buildTags())
+}
+
+// Check runs lint and tests.
+func Check() {
+	mg.SerialDeps(Lint, Test)
+}
+
+// Bench runs benchmarks in the default configuration for a Go app, using wazero.
+func Bench() error {
+	return sh.RunV("go", args.BenchArgs("./...", 1, args.BenchModeWazero)...)
+}
+
+// BenchCGO runs benchmarks with cgo instead of wasm. A C++ toolchain and the library must be installed to run.
+func BenchCGO() error {
+	return sh.RunV("go", args.BenchArgs("./...", 1, args.BenchModeCGO)...)
+}
+
+// BenchDefault runs benchmarks using the reference library for comparison.
+func BenchDefault() error {
+	return sh.RunV("go", args.BenchArgs("./...", 1, args.BenchModeDefault)...)
+}
+
+// BenchAll runs all benchmark types and outputs with benchstat. A C++ toolchain and libinjection must be installed to run.
+func BenchAll() error {
+	if err := os.MkdirAll("build", 0o755); err != nil {
+		return err
+	}
+
+	fmt.Println("Executing wazero benchmarks")
+	wazero, err := sh.Output("go", args.BenchArgs("./...", 5, args.BenchModeWazero)...)
+	if err != nil {
+		return fmt.Errorf("error running wazero benchmarks: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join("build", "bench.txt"), []byte(wazero), 0o644); err != nil {
+		return err
+	}
+
+	fmt.Println("Executing cgo benchmarks")
+	cgo, err := sh.Output("go", args.BenchArgs("./...", 5, args.BenchModeCGO)...)
+	if err != nil {
+		fmt.Println("Error running cgo benchmarks:")
+		return fmt.Errorf("error running cgo benchmarks: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join("build", "bench_cgo.txt"), []byte(cgo), 0o644); err != nil {
+		return err
+	}
+
+	fmt.Println("Executing default benchmarks")
+	def, err := sh.Output("go", args.BenchArgs("./...", 5, args.BenchModeDefault)...)
+	if err != nil {
+		return fmt.Errorf("error running default benchmarks: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join("build", "bench_default.txt"), []byte(def), 0o644); err != nil {
+		return err
+	}
+
+	return sh.RunV("go", "run", fmt.Sprintf("golang.org/x/perf/cmd/benchstat@%s", versions.GolangPerf),
+		"build/bench_default.txt", "build/bench.txt", "build/bench_cgo.txt")
+}
+
+func buildTags() string {
+	mode := strings.ToLower(os.Getenv("WASI_TEST_MODE"))
+
+	var tags []string
+	if mode == "cgo" {
+		tags = append(tags, fmt.Sprintf("%s_cgo", meta.LibraryName))
+	}
+
+	return strings.Join(tags, ",")
+}
