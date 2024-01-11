@@ -120,7 +120,7 @@ func UpdateLibs() error {
 	if err := os.MkdirAll(wasmDir, 0o755); err != nil {
 		return err
 	}
-	return sh.RunV("docker", "run", "-it", "--rm", "-v", fmt.Sprintf("%s:/out", wasmDir), "wasilibs-build")
+	return sh.RunV("docker", "run", "--rm", "-v", fmt.Sprintf("%s:/out", wasmDir), "wasilibs-build")
 }
 
 func buildTags() string {
